@@ -6,86 +6,139 @@ plugins {
 version = project.mod_version
 group = project.maven_group
 
+base {
+	archivesName = project.archives_base_name
+}
+
 repositories {
-	// Add repositories to retrieve artifacts from in here.
-	// You should only use this when depending on other mods because
-	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-	// See https://docs.gradle.org/current/userguide/declaring_repositories.html
-	// for more information about repositories.
+	maven {
+		name = 'Fabric'
+		url = 'https://maven.fabricmc.net/'
+	}
+	mavenCentral()
 }
 
 loom {
 	splitEnvironmentSourceSets()
+	accessWidenerPath = file('src/main/resources/shadermetal.accesswidener')
 
 	mods {
-		"shader-metal" {
+		shadermetal {
 			sourceSet sourceSets.main
 			sourceSet sourceSets.client
 		}
 	}
 }
 
-fabricApi {
-	configureDataGeneration {
-		client = true
-	}
-}
-
 dependencies {
-	// To change the versions see the gradle.properties file
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings loom.officialMojangMappings()
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-
-	// Fabric API. This is technically optional, but you probably want it anyway.
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 }
 
-processResources {
-	def version = project.version
-	inputs.property "version", version
+def nativeSourceDir = file('native')
+def nativeBuildDir = layout.buildDirectory.dir('native')
+def jniClassDir = layout.buildDirectory.dir('jni-classes')
+def generatedNativeResourcesDir = layout.buildDirectory.dir('generated/native-resources')
+def nativeLibrary = nativeBuildDir.map { it.file('libshadermetal.dylib') }
 
-	filesMatching("fabric.mod.json") {
-		expand "version": version
+sourceSets {
+	main {
+		resources.srcDir(generatedNativeResourcesDir)
+	}
+}
+
+tasks.register('generateJniHeaders', JavaCompile) {
+	description = 'Generates the authoritative ShaderMetal JNI headers.'
+	group = 'build'
+	source = fileTree('src/client/java') {
+		include 'com/example/shadermetal/proxy/**/*.java'
+	}
+	classpath = files()
+	destinationDirectory = jniClassDir
+	options.release = 21
+	options.encoding = 'UTF-8'
+	options.compilerArgs += ['-h', file('native/include').absolutePath]
+	outputs.dir(file('native/include'))
+
+	doFirst {
+		file('native/include').mkdirs()
+		delete fileTree('native/include') {
+			include '*.h'
+		}
+	}
+}
+
+tasks.register('configureNative', Exec) {
+	description = 'Configures the macOS arm64 native renderer.'
+	group = 'build'
+	dependsOn tasks.named('generateJniHeaders')
+	inputs.file(file('native/CMakeLists.txt'))
+	outputs.file(nativeBuildDir.map { it.file('CMakeCache.txt') })
+	environment 'JAVA_HOME', System.getProperty('java.home')
+	commandLine 'cmake', '-S', nativeSourceDir.absolutePath,
+		'-B', nativeBuildDir.get().asFile.absolutePath,
+		'-DCMAKE_BUILD_TYPE=Debug'
+}
+
+tasks.register('buildNative', Exec) {
+	description = 'Builds libshadermetal.dylib.'
+	group = 'build'
+	dependsOn tasks.named('configureNative')
+	inputs.files(fileTree('native/src'), fileTree('native/include'))
+	inputs.file(file('native/CMakeLists.txt'))
+	outputs.file(nativeLibrary)
+	commandLine 'cmake', '--build', nativeBuildDir.get().asFile.absolutePath,
+		'--parallel', '2'
+}
+
+tasks.register('stageNativeLibrary', Copy) {
+	description = 'Stages the native renderer for jar packaging.'
+	group = 'build'
+	dependsOn tasks.named('buildNative')
+	from(nativeLibrary)
+	into(generatedNativeResourcesDir.map { it.dir('natives/macos-arm64') })
+}
+
+processResources {
+	dependsOn tasks.named('stageNativeLibrary')
+	inputs.property 'version', project.version
+	filesMatching('fabric.mod.json') {
+		expand 'version': project.version
 	}
 }
 
 tasks.withType(JavaCompile).configureEach {
-	it.options.release = 21
+	options.release = 21
+	options.encoding = 'UTF-8'
 }
 
 java {
-	// Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
-	// if it is present.
-	// If you remove this line, sources will not be generated.
 	withSourcesJar()
-
+	toolchain.languageVersion = JavaLanguageVersion.of(21)
 	sourceCompatibility = JavaVersion.VERSION_21
 	targetCompatibility = JavaVersion.VERSION_21
 }
 
-jar {
-	def projectName = project.name
-	inputs.property "projectName", projectName
+tasks.named('sourcesJar') {
+	dependsOn tasks.named('stageNativeLibrary')
+}
 
-	from("LICENSE") {
-		rename { "${it}_$projectName"}
+tasks.named('runClient', JavaExec) {
+	args '--width', '1280', '--height', '720'
+}
+
+jar {
+	from('LICENSE') {
+		rename { "${it}_${project.name}" }
 	}
 }
 
-// configure the maven publication
 publishing {
 	publications {
-		create("mavenJava", MavenPublication) {
+		create('mavenJava', MavenPublication) {
 			from components.java
 		}
-	}
-
-	// See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
-	repositories {
-		// Add repositories to publish to here.
-		// Notice: This block does NOT have the same function as the block in the top level.
-		// The repositories here will be used for publishing your artifact, not for
-		// retrieving dependencies.
 	}
 }
