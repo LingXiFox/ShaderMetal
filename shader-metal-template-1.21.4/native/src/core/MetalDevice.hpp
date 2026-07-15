@@ -4,6 +4,7 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
+#include <cstddef>
 #include <mutex>
 #include <string>
 
@@ -19,7 +20,7 @@ public:
     id<MTLCommandQueue> commandQueue() const;
     CAMetalLayer *layer() const;
     void setDisplaySyncEnabled(bool enabled);
-    void resize();
+    void resize(std::size_t framebufferWidth, std::size_t framebufferHeight);
     void close();
 
     MetalDevice(const MetalDevice &) = delete;

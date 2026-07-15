@@ -31,6 +31,21 @@ bin/
 # fabric
 
 run/
+/config/
+/crash-reports/
+/data/
+/downloads/
+/logs/
+/mods/
+/resourcepacks/
+/saves/
+/screenshots/
+/server-resource-packs/
+/shadermetal/
+/command_history.txt
+/options.txt
+/servers.dat
+/usercache.json
 
 # java
 

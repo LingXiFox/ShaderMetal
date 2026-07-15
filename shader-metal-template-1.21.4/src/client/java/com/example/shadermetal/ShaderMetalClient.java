@@ -1,6 +1,7 @@
 package com.example.shadermetal;
 
 import com.example.shadermetal.proxy.RendererProxy;
+import com.example.shadermetal.render.RayTracingLightCollector;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -35,6 +36,7 @@ public final class ShaderMetalClient implements ClientModInitializer {
             Path library = extractNativeLibrary(runtimeDirectory.resolve("native"));
             System.load(library.toAbsolutePath().toString());
             RendererProxy.initFolderPath(runtimeDirectory.toAbsolutePath().toString());
+            RayTracingLightCollector.initialize();
             LOGGER.info("Loaded ShaderMetal native library from {}", library);
         } catch (IOException | UnsatisfiedLinkError exception) {
             LIBRARY_LOADED.set(false);

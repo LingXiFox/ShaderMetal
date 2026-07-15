@@ -6,6 +6,7 @@
 	"client": [
 		"AbstractTextureMixin",
 		"BufferRendererMixin",
+		"ClientWorldMixin",
 		"CompiledShaderMixin",
 		"GameRendererMixin",
 		"GlStateManagerMixin",

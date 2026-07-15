@@ -13,6 +13,10 @@
     return nil;
 }
 
+- (BOOL)acceptsFirstResponder {
+    return NO;
+}
+
 - (BOOL)isOpaque {
     return YES;
 }
@@ -60,6 +64,10 @@ bool MetalDevice::initialize(NSWindow *window, std::string &error) {
         error = "ShaderMetal requires Metal argument buffers tier 2";
         return false;
     }
+    if (!device.supportsRaytracing) {
+        error = "ShaderMetal Stage C requires hardware Metal ray tracing";
+        return false;
+    }
     id<MTLCommandQueue> commandQueue = [device newCommandQueue];
     if (commandQueue == nil) {
         error = "unable to create the Metal command queue";
@@ -93,12 +101,15 @@ bool MetalDevice::initialize(NSWindow *window, std::string &error) {
         metalView.wantsLayer = YES;
         metalView.layer = metalLayer;
         metalLayer.frame = metalView.bounds;
-        const NSRect backingBounds = [metalView convertRectToBacking:metalView.bounds];
+        NSResponder *previousFirstResponder = window.firstResponder;
         initialDrawableSize = CGSizeMake(
-            std::max(1.0, std::round(backingBounds.size.width)),
-            std::max(1.0, std::round(backingBounds.size.height)));
+            std::max(1.0, std::round(contentView.bounds.size.width)),
+            std::max(1.0, std::round(contentView.bounds.size.height)));
         metalLayer.drawableSize = initialDrawableSize;
         [contentView addSubview:metalView positioned:NSWindowAbove relativeTo:nil];
+        if (window.firstResponder != previousFirstResponder) {
+            [window makeFirstResponder:previousFirstResponder];
+        }
     });
 
     if (installationError != nil || metalView == nil || metalLayer == nil) {
@@ -119,6 +130,7 @@ bool MetalDevice::initialize(NSWindow *window, std::string &error) {
     }
 
     NSLog(@"[ShaderMetal] Metal initialized on GPU: %@", device.name);
+    NSLog(@"[ShaderMetal] Hardware ray tracing: supported");
     NSLog(@"[ShaderMetal] Initial drawable size: %.0fx%.0f",
           initialDrawableSize.width, initialDrawableSize.height);
     NSLog(@"[ShaderMetal] Metal display sync %s",
@@ -171,7 +183,12 @@ void MetalDevice::setDisplaySyncEnabled(bool enabled) {
     }
 }
 
-void MetalDevice::resize() {
+void MetalDevice::resize(std::size_t framebufferWidth,
+                         std::size_t framebufferHeight) {
+    if (framebufferWidth == 0 || framebufferHeight == 0) {
+        return;
+    }
+
     NSWindow *window = nil;
     NSView *metalView = nil;
     CAMetalLayer *metalLayer = nil;
@@ -191,16 +208,31 @@ void MetalDevice::resize() {
             return;
         }
 
+        // macOS can temporarily report the unscaled fullscreen backing size
+        // while a screenshot tool or another app owns focus. Rebuilding the
+        // ray-tracing and MetalFX targets for that inactive-only transition
+        // causes a multi-frame stall, then immediately rebuilds them again on
+        // focus return. A real interactive resize is delivered while the game
+        // is active and key.
+        if (!NSApp.isActive || !window.isKeyWindow) {
+            return;
+        }
+
+        NSResponder *currentFirstResponder = window.firstResponder;
+        if (currentFirstResponder == nil || currentFirstResponder == metalView ||
+            currentFirstResponder == window) {
+            [window makeFirstResponder:container];
+        }
+
         if (!NSEqualRects(metalView.frame, container.bounds)) {
             metalView.frame = container.bounds;
         }
         metalLayer.frame = metalView.bounds;
         metalLayer.contentsScale = window.backingScaleFactor;
 
-        const NSRect backingBounds = [metalView convertRectToBacking:metalView.bounds];
         const CGSize drawableSize = CGSizeMake(
-            std::max(1.0, std::round(backingBounds.size.width)),
-            std::max(1.0, std::round(backingBounds.size.height)));
+            static_cast<CGFloat>(framebufferWidth),
+            static_cast<CGFloat>(framebufferHeight));
         if (!CGSizeEqualToSize(metalLayer.drawableSize, drawableSize)) {
             metalLayer.drawableSize = drawableSize;
             NSLog(@"[ShaderMetal] Drawable resized to %.0fx%.0f",

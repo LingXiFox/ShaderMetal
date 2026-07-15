@@ -31,11 +31,13 @@ import net.minecraft.client.render.VertexFormat;
 import net.minecraft.client.render.VertexFormats;
 import net.minecraft.client.util.BufferAllocator;
 import net.minecraft.util.Identifier;
+import org.joml.Matrix4fc;
 import org.lwjgl.system.MemoryUtil;
 
 public final class CoreShaderBridge {
     private static final int VERTEX_BUFFER_USAGE = 0x80;
     private static final int INDEX_BUFFER_USAGE = 0x40;
+    private static final int DRAW_MATRIX_BYTES = 2 * 16 * Float.BYTES;
     private static final Pattern SAMPLER_SLOT = Pattern.compile(".*?(\\d+)$");
 
     private static final Map<CompiledShader, CapturedShader> COMPILED_SHADERS =
@@ -46,6 +48,8 @@ public final class CoreShaderBridge {
     private static final AtomicBoolean FIRST_DRAW_LOGGED = new AtomicBoolean();
     private static final AtomicBoolean FIRST_PERSISTENT_DRAW_LOGGED = new AtomicBoolean();
     private static volatile ShaderProgram boundProgram;
+    private static boolean worldPass;
+    private static boolean restoreWorldPassAfterViewModel;
 
     private CoreShaderBridge() {
     }
@@ -102,6 +106,29 @@ public final class CoreShaderBridge {
 
     public static void clearBoundProgram() {
         boundProgram = null;
+    }
+
+    public static void beginWorldPass() {
+        RenderSystem.assertOnRenderThread();
+        restoreWorldPassAfterViewModel = false;
+        worldPass = true;
+    }
+
+    public static void endWorldPass() {
+        RenderSystem.assertOnRenderThread();
+        worldPass = false;
+    }
+
+    public static void beginViewModelPass() {
+        RenderSystem.assertOnRenderThread();
+        restoreWorldPassAfterViewModel = worldPass;
+        worldPass = false;
+    }
+
+    public static void endViewModelPass() {
+        RenderSystem.assertOnRenderThread();
+        worldPass = restoreWorldPassAfterViewModel;
+        restoreWorldPassAfterViewModel = false;
     }
 
     public static void captureVertexBufferUpload(VertexBuffer vertexBuffer,
@@ -218,17 +245,20 @@ public final class CoreShaderBridge {
                 persistent.indexBytes = null;
             }
 
-            ByteBuffer uniforms = MemoryUtil.memAlloc(registered.layout().size())
+            ByteBuffer uniforms = MemoryUtil.memAlloc(
+                    registered.layout().size() + DRAW_MATRIX_BYTES)
                 .order(ByteOrder.nativeOrder());
             try {
                 MemoryUtil.memSet(MemoryUtil.memAddress(uniforms), 0,
-                    registered.layout().size());
+                    uniforms.capacity());
                 // VertexBuffer's outer draw overload has already initialized explicit matrices.
                 packUniforms(program, info, registered.layout(), uniforms);
+                long matrixData = packDrawMatrices(
+                    uniforms, registered.layout().size(), program);
                 DrawCommandProxy.draw(persistent.vertexId, persistent.indexId,
                     registered.shaderId(), persistent.indexCount, persistent.indexType,
                     MemoryUtil.memAddress(uniforms), registered.layout().size(), 1, 0, 0,
-                    false);
+                    matrixData, primaryNativeTexture(info), worldPass, false);
             } finally {
                 MemoryUtil.memFree(uniforms);
             }
@@ -266,6 +296,8 @@ public final class CoreShaderBridge {
             }
         }
         boundProgram = null;
+        worldPass = false;
+        restoreWorldPassAfterViewModel = false;
     }
 
     public static void drawWithGlobalProgram(BuiltBuffer builtBuffer) {
@@ -315,15 +347,19 @@ public final class CoreShaderBridge {
             vertexId = uploadVertexBuffer(builtBuffer, parameters);
             UploadedIndexBuffer indexBuffer = uploadIndexBuffer(builtBuffer, parameters);
             indexId = indexBuffer.id();
-            ByteBuffer uniforms = MemoryUtil.memAlloc(registered.layout().size())
+            ByteBuffer uniforms = MemoryUtil.memAlloc(
+                    registered.layout().size() + DRAW_MATRIX_BYTES)
                 .order(ByteOrder.nativeOrder());
             try {
                 MemoryUtil.memSet(MemoryUtil.memAddress(uniforms), 0,
-                    registered.layout().size());
+                    uniforms.capacity());
                 packUniforms(program, info, registered.layout(), uniforms);
+                long matrixData = packDrawMatrices(
+                    uniforms, registered.layout().size(), program);
                 DrawCommandProxy.draw(vertexId, indexId, registered.shaderId(),
                     indexBuffer.indexCount(), indexType(parameters.indexType()),
-                    MemoryUtil.memAddress(uniforms), registered.layout().size(), 1, 0, 0);
+                    MemoryUtil.memAddress(uniforms), registered.layout().size(), 1, 0, 0,
+                    matrixData, primaryNativeTexture(info), worldPass);
                 enqueued = true;
             } finally {
                 MemoryUtil.memFree(uniforms);
@@ -541,7 +577,7 @@ public final class CoreShaderBridge {
             info.vertex.source(), info.fragment.source(), info.format, declarations);
         String key = info.vertex.id() + "+" + info.fragment.id() + "/"
             + Integer.toUnsignedString(System.identityHashCode(program), 16) + "/"
-            + nativeDrawMode;
+            + nativeDrawMode + shaderTraits(info.fragment.source());
         int shaderId = ShaderProxy.registerShader(key, vertexFormatType(info.format),
             nativeDrawMode, layout.size(), translated.vertexSource(),
             translated.fragmentSource());
@@ -549,6 +585,17 @@ public final class CoreShaderBridge {
             throw new IllegalStateException("Native shader registration failed for " + key);
         }
         return shaderId;
+    }
+
+    private static String shaderTraits(String fragmentSource) {
+        StringBuilder traits = new StringBuilder();
+        if (fragmentSource.contains("#define ALPHA_CUTOUT")) {
+            traits.append("/alpha_cutout");
+        }
+        if (fragmentSource.contains("#define EMISSIVE")) {
+            traits.append("/emissive");
+        }
+        return traits.toString();
     }
 
     private static int uploadVertexBuffer(BuiltBuffer builtBuffer,
@@ -811,6 +858,78 @@ public final class CoreShaderBridge {
             }
         }
         return fallback;
+    }
+
+    private static long packDrawMatrices(ByteBuffer target, int offset,
+        ShaderProgram program) {
+        float modelOffsetX = 0.0F;
+        float modelOffsetY = 0.0F;
+        float modelOffsetZ = 0.0F;
+        GlUniform modelOffset = program.getUniform("ModelOffset");
+        if (modelOffset != null) {
+            FloatBuffer values = modelOffset.getFloatData();
+            if (values != null && values.capacity() >= 3) {
+                modelOffsetX = values.get(0);
+                modelOffsetY = values.get(1);
+                modelOffsetZ = values.get(2);
+            }
+        }
+
+        putModelViewMatrix(target, offset, RenderSystem.getModelViewMatrix(),
+            modelOffsetX, modelOffsetY, modelOffsetZ);
+        putMatrix(target, offset + 16 * Float.BYTES, RenderSystem.getProjectionMatrix());
+        return MemoryUtil.memAddress(target) + offset;
+    }
+
+    private static void putModelViewMatrix(ByteBuffer target, int offset,
+        Matrix4fc matrix, float modelOffsetX, float modelOffsetY, float modelOffsetZ) {
+        putMatrix(target, offset, matrix);
+
+        // terrain.vsh evaluates ModelViewMat * vec4(Position + ModelOffset, 1).
+        // Fold that local translation into the matrix used by the TLAS without
+        // allocating a Matrix4f for every visible chunk layer.
+        target.putFloat(offset + 48, matrix.m00() * modelOffsetX
+            + matrix.m10() * modelOffsetY + matrix.m20() * modelOffsetZ + matrix.m30());
+        target.putFloat(offset + 52, matrix.m01() * modelOffsetX
+            + matrix.m11() * modelOffsetY + matrix.m21() * modelOffsetZ + matrix.m31());
+        target.putFloat(offset + 56, matrix.m02() * modelOffsetX
+            + matrix.m12() * modelOffsetY + matrix.m22() * modelOffsetZ + matrix.m32());
+        target.putFloat(offset + 60, matrix.m03() * modelOffsetX
+            + matrix.m13() * modelOffsetY + matrix.m23() * modelOffsetZ + matrix.m33());
+    }
+
+    private static void putMatrix(ByteBuffer target, int offset, Matrix4fc matrix) {
+        target.putFloat(offset, matrix.m00());
+        target.putFloat(offset + 4, matrix.m01());
+        target.putFloat(offset + 8, matrix.m02());
+        target.putFloat(offset + 12, matrix.m03());
+        target.putFloat(offset + 16, matrix.m10());
+        target.putFloat(offset + 20, matrix.m11());
+        target.putFloat(offset + 24, matrix.m12());
+        target.putFloat(offset + 28, matrix.m13());
+        target.putFloat(offset + 32, matrix.m20());
+        target.putFloat(offset + 36, matrix.m21());
+        target.putFloat(offset + 40, matrix.m22());
+        target.putFloat(offset + 44, matrix.m23());
+        target.putFloat(offset + 48, matrix.m30());
+        target.putFloat(offset + 52, matrix.m31());
+        target.putFloat(offset + 56, matrix.m32());
+        target.putFloat(offset + 60, matrix.m33());
+    }
+
+    private static int primaryNativeTexture(ProgramInfo info) {
+        if (!worldPass) {
+            return 0;
+        }
+        synchronized (info) {
+            for (ShaderProgramDefinition.Sampler sampler : info.samplerDefinitions) {
+                Integer glId = info.samplerTextures.get(sampler.name());
+                if (glId != null && glId > 0) {
+                    return TextureBridge.nativeTextureId(glId);
+                }
+            }
+        }
+        return 0;
     }
 
     private static ProgramInfo requireProgramInfo(ShaderProgram program) {

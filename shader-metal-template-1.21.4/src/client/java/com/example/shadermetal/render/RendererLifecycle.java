@@ -31,6 +31,8 @@ public final class RendererLifecycle {
                 RendererProxy.setVsync(vsyncEnabled);
                 RendererProxy.initRenderer(GLFW_LIBRARY_CANDIDATES, windowHandle);
                 RendererProxy.setVsync(vsyncEnabled);
+                framebufferSizeChanged(client.getWindow().getFramebufferWidth(),
+                    client.getWindow().getFramebufferHeight());
             } catch (RuntimeException | Error exception) {
                 INITIALIZED.set(false);
                 throw exception;
@@ -49,9 +51,9 @@ public final class RendererLifecycle {
         RendererProxy.present();
     }
 
-    public static void framebufferSizeChanged() {
-        if (INITIALIZED.get()) {
-            WindowProxy.onFramebufferSizeChanged();
+    public static void framebufferSizeChanged(int width, int height) {
+        if (INITIALIZED.get() && width > 0 && height > 0) {
+            WindowProxy.onFramebufferSizeChanged(width, height);
         }
     }
 

@@ -24,6 +24,8 @@ public final class RendererProxy {
 
     public static native void close();
 
+    public static native void resetRayTracingScene();
+
     public static native void shouldRenderWorld(boolean renderWorld);
 
     public static native void takeScreenshot(boolean withUi, int width, int height, int channels,
@@ -36,6 +38,23 @@ public final class RendererProxy {
     public static native void updateOverlayPostUniform(long source);
 
     public static native void setCameraPos(double x, double y, double z);
+
+    public static native void setCameraSubmergedInWater(boolean submerged);
+
+    public static native void setLocalPlayerShadowProxy(
+        boolean enabled, float relativeX, float relativeY, float relativeZ,
+        float bodyYawRadians, int pose, float limbPhase, float limbAmplitude,
+        float handSwingProgress, float headYawRadians, float headPitchRadians);
+
+    public static native void setCelestialLighting(
+        float sunX, float sunY, float sunZ,
+        float sunRed, float sunGreen, float sunBlue,
+        float moonX, float moonY, float moonZ,
+        float moonRed, float moonGreen, float moonBlue,
+        float skyRed, float skyGreen, float skyBlue,
+        float weatherStrength);
+
+    public static native void setLocalLights(long source, int count);
 
     public static native void setClearColor(float red, float green, float blue, float alpha);
 

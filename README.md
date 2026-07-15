@@ -14,6 +14,8 @@ drop-in production renderer, and worlds should be backed up before testing.
   acceleration structures, performs ray intersections through Metal, and uses MetalFX temporal
   denoising/upscaling where supported. Visual stability and performance tuning are ongoing.
 
+The source project is in [`shader-metal-template-1.21.4`](shader-metal-template-1.21.4/).
+
 ## Requirements
 
 - Minecraft Java Edition 1.21.4
@@ -21,31 +23,26 @@ drop-in production renderer, and worlds should be backed up before testing.
 - Apple Silicon Mac with a Metal device that reports ray-tracing support
 - Current development target: macOS 26 or newer
 - JDK 21, CMake 3.20 or newer, `xxd`, and Xcode Command Line Tools
-- Git submodules initialized from the workspace root
 
 Current testing is limited to an M5 Mac on macOS 27 beta. Other Macs and mod combinations are
 unverified.
 
-```sh
-git submodule update --init --recursive
-```
-
-## Build And Run
-
-All local Gradle invocations go through a guard that selects JDK 21, disables persistent daemons,
-stops project Java/game processes on exit, and verifies cleanup.
+## Build
 
 ```sh
+git clone --recurse-submodules https://github.com/LingXiFox/ShaderMetal.git
+cd ShaderMetal/shader-metal-template-1.21.4
 ./script/gradle_task.sh build
-./script/gradle_task.sh runClient
 ```
 
-The mod JAR is written to `build/libs/`. Generate authoritative JNI headers and verify native
-exports with:
+The mod JAR is written to `build/libs/`. All local Gradle invocations should go through
+`script/gradle_task.sh`; it disables persistent daemons and cleans project Java/game processes
+when the task exits.
+
+To start the development client:
 
 ```sh
-./script/gradle_task.sh generateJniHeaders
-./script/check_jni_contract.sh
+./script/gradle_task.sh runClient
 ```
 
 ## Known Limitations

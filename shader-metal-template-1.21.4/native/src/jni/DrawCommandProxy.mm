@@ -40,7 +40,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_example_shadermetal_proxy_DrawCommandProxy_draw(
     JNIEnv *environment, jclass, jint vertexId, jint indexId, jint shaderId,
     jint indexCount, jint indexType, jlong uniformData, jint uniformSize,
-    jint instanceCount, jint firstIndex, jint firstVertex,
+    jint instanceCount, jint firstIndex, jint firstVertex, jlong matrixData,
+    jint textureId, jboolean worldDraw,
     jboolean transientBuffers) {
     @autoreleasepool {
         try {
@@ -66,16 +67,24 @@ Java_com_example_shadermetal_proxy_DrawCommandProxy_draw(
                                    "draw uniform pointer is null");
                 return;
             }
+            if (matrixData == 0) {
+                throwJavaException(environment, "java/lang/IllegalArgumentException",
+                                   "draw matrix pointer is null");
+                return;
+            }
 
             const void *uniformPointer = uniformSize == 0
                 ? nullptr
                 : reinterpret_cast<const void *>(
                       static_cast<std::uintptr_t>(uniformData));
+            const void *matrixPointer = reinterpret_cast<const void *>(
+                static_cast<std::uintptr_t>(matrixData));
             std::string error;
             if (!shadermetal::RasterPass::shared().enqueueDraw(
                     vertexId, indexId, shaderId, indexCount, indexType,
                     uniformPointer, static_cast<std::size_t>(uniformSize),
                     instanceCount, firstIndex, firstVertex,
+                    matrixPointer, textureId, worldDraw != JNI_FALSE,
                     transientBuffers != JNI_FALSE, error)) {
                 throwJavaException(environment, "java/lang/IllegalStateException",
                                    error.empty() ? "draw enqueue failed" : error);

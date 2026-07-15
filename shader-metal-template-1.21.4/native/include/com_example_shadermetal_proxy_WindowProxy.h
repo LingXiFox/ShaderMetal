@@ -10,10 +10,10 @@ extern "C" {
 /*
  * Class:     com_example_shadermetal_proxy_WindowProxy
  * Method:    onFramebufferSizeChanged
- * Signature: ()V
+ * Signature: (II)V
  */
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_WindowProxy_onFramebufferSizeChanged
-  (JNIEnv *, jclass);
+  (JNIEnv *, jclass, jint, jint);
 
 #ifdef __cplusplus
 }

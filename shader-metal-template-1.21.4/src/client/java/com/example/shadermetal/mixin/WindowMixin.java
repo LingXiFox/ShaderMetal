@@ -17,6 +17,6 @@ public abstract class WindowMixin {
     @Inject(method = "onFramebufferSizeChanged(JII)V", at = @At("TAIL"))
     private void shadermetal$framebufferSizeChanged(long windowHandle, int width, int height,
         CallbackInfo callbackInfo) {
-        RendererLifecycle.framebufferSizeChanged();
+        RendererLifecycle.framebufferSizeChanged(width, height);
     }
 }

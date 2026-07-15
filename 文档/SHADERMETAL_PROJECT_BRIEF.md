@@ -242,7 +242,7 @@ set_target_properties(shadermetal PROPERTIES OUTPUT_NAME "shadermetal" SUFFIX ".
 ## 9. 需要拍板的技术决策（遇到先停，不要猜）
 
 1. **Metal 绑定**：建议纯 Objective-C++（.mm）+ ObjC Metal 头文件——必须碰 AppKit（NSWindow/NSView），metal-cpp 覆盖不到窗口层，混用更乱。默认走 .mm；引入 metal-cpp 需明确收益。
-2. **Radiance license**：确认可合法参考/复用其 Java/Mixin（署名/开源义务？）。阶段 A 前置。
+2. **Radiance license**：已确认 Radiance 使用 GPL-3.0；ShaderMetal 以 GPL-3.0-only 接力开源，并在 README 与 THIRD_PARTY_NOTICES 中持续保留来源、参考版本和修改说明。
 3. **JNI 精确签名**：以本项目 `javac -h` 生成的头文件为准；§5 数量约 54，非精确。
 4. **顶点布局（§4 末）**：stride=32 / normal@28 是待核对假设，阶段 C 前对当前 Radiance 版本验证。
 5. **bindless 纹理**：GLSL `sampler2D textures[]` 经 SPIRV-Cross 转 argument buffer 后的绑定索引与更新时机需实测。

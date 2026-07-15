@@ -10,7 +10,42 @@ export PATH="$JAVA_HOME/bin:$PATH"
 ROOT_KEY="$(printf '%s' "$ROOT_DIR" | shasum -a 256 | cut -c 1-16)"
 STATE_FILE="${TMPDIR:-/tmp}"
 STATE_FILE="${STATE_FILE%/}/shadermetal-gradle-task-${UID}-${ROOT_KEY}.pid"
+GAMEMODE_PID_FILE="$ROOT_DIR/build/gamemode/client.pid"
+GAMEMODE_EXECUTABLE="$ROOT_DIR/build/gamemode/ShaderMetal Dev.app/Contents/MacOS/ShaderMetalDev"
+GAMEMODE_STDOUT_LOG="$ROOT_DIR/build/gamemode/client.stdout.log"
+GAMEMODE_STDERR_LOG="$ROOT_DIR/build/gamemode/client.stderr.log"
 GRADLE_PID=""
+GRADLE_ARGUMENTS=("$@")
+
+USE_GAMEMODE_TASK=false
+for argument in "${GRADLE_ARGUMENTS[@]}"; do
+    if [[ "$argument" == "runClient" || "$argument" == ":runClient" ||
+          "$argument" == "runClientGameMode" ||
+          "$argument" == ":runClientGameMode" ]]; then
+        USE_GAMEMODE_TASK=true
+        break
+    fi
+done
+
+if [[ "$USE_GAMEMODE_TASK" == true ]]; then
+    for index in "${!GRADLE_ARGUMENTS[@]}"; do
+        argument="${GRADLE_ARGUMENTS[$index]}"
+        case "$argument" in
+            runClient)
+                GRADLE_ARGUMENTS[$index]="runClientGameMode"
+                ;;
+            :runClient)
+                GRADLE_ARGUMENTS[$index]=":runClientGameMode"
+                ;;
+            --args=*)
+                GRADLE_ARGUMENTS[$index]="-PshadermetalGameArgs=${argument#--args=}"
+                ;;
+            --debug-jvm)
+                GRADLE_ARGUMENTS[$index]="-PshadermetalDebug=true"
+                ;;
+        esac
+    done
+fi
 
 command_for_pid() {
     ps -p "$1" -o command= 2>/dev/null || true
@@ -80,7 +115,7 @@ stop_process_tree() {
     [[ -z "$pids" ]] || terminate_pids "$pids"
 }
 
-project_runtime_java_pids() {
+project_runtime_pids() {
     local pid command
 
     while IFS= read -r pid; do
@@ -91,12 +126,23 @@ project_runtime_java_pids() {
             printf '%s\n' "$pid"
         fi
     done < <(pgrep -x java 2>/dev/null || true)
+
+    if [[ -f "$GAMEMODE_PID_FILE" ]]; then
+        pid="$(sed -n '1p' "$GAMEMODE_PID_FILE" 2>/dev/null || true)"
+        if [[ "$pid" =~ ^[0-9]+$ ]]; then
+            command="$(command_for_pid "$pid")"
+            if [[ "$command" == "$GAMEMODE_EXECUTABLE"* ]]; then
+                printf '%s\n' "$pid"
+            fi
+        fi
+    fi
 }
 
-stop_project_runtime_java() {
+stop_project_runtime() {
     local pids
-    pids="$(project_runtime_java_pids)"
+    pids="$(project_runtime_pids | sort -u)"
     [[ -z "$pids" ]] || terminate_pids "$pids"
+    rm -f "$GAMEMODE_PID_FILE" "$GAMEMODE_STDOUT_LOG" "$GAMEMODE_STDERR_LOG"
 }
 
 recover_previous_invocation() {
@@ -122,16 +168,16 @@ cleanup() {
     if [[ -n "$GRADLE_PID" ]]; then
         stop_process_tree "$GRADLE_PID" || status=1
     fi
-    stop_project_runtime_java || status=1
+    stop_project_runtime || status=1
 
     if [[ -f "$STATE_FILE" ]]; then
         state_pid="$(sed -n '1p' "$STATE_FILE" 2>/dev/null || true)"
         [[ "$state_pid" != "$GRADLE_PID" ]] || rm -f "$STATE_FILE"
     fi
 
-    remaining="$(project_runtime_java_pids)"
+    remaining="$(project_runtime_pids | sort -u)"
     if [[ -n "$remaining" ]]; then
-        echo "ShaderMetal Java processes remain after cleanup: $remaining" >&2
+        echo "ShaderMetal runtime processes remain after cleanup: $remaining" >&2
         status=1
     fi
     exit "$status"
@@ -140,9 +186,9 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 recover_previous_invocation
-stop_project_runtime_java
+stop_project_runtime
 
-"$GRADLEW" --no-daemon "$@" &
+"$GRADLEW" --no-daemon "${GRADLE_ARGUMENTS[@]}" &
 GRADLE_PID=$!
 printf '%s\n' "$GRADLE_PID" > "$STATE_FILE"
 wait "$GRADLE_PID"

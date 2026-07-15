@@ -4,6 +4,7 @@
 #include "core/GlfwBridge.hpp"
 #include "core/MetalDevice.hpp"
 #include "render/PipelineStateTracker.hpp"
+#include "render/RasterPass.hpp"
 #include "resource/BufferManager.hpp"
 #include "resource/SamplerCache.hpp"
 #include "resource/TextureManager.hpp"
@@ -186,7 +187,7 @@ JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_present(
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_fuseWorld(
     JNIEnv *, jclass) {
-    SHADERMETAL_STAGE_A_STUB();
+    shadermetal::RasterPass::shared().sealWorld();
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_postBlur(
@@ -208,9 +209,14 @@ JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_close(
     }
 }
 
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_resetRayTracingScene(
+    JNIEnv *, jclass) {
+    shadermetal::FrameContext::shared().resetRayTracingScene();
+}
+
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_shouldRenderWorld(
-    JNIEnv *, jclass, jboolean) {
-    SHADERMETAL_STAGE_A_STUB();
+    JNIEnv *, jclass, jboolean renderWorld) {
+    shadermetal::FrameContext::shared().setShouldRenderWorld(renderWorld != JNI_FALSE);
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_takeScreenshot(
@@ -235,8 +241,55 @@ JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_updateOv
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setCameraPos(
-    JNIEnv *, jclass, jdouble, jdouble, jdouble) {
-    SHADERMETAL_STAGE_A_STUB();
+    JNIEnv *, jclass, jdouble x, jdouble y, jdouble z) {
+    shadermetal::FrameContext::shared().setCameraPosition(x, y, z);
+}
+
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setCameraSubmergedInWater(
+    JNIEnv *, jclass, jboolean submerged) {
+    shadermetal::FrameContext::shared().setCameraSubmergedInWater(
+        submerged == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setLocalPlayerShadowProxy(
+    JNIEnv *, jclass, jboolean enabled, jfloat relativeX, jfloat relativeY,
+    jfloat relativeZ, jfloat bodyYawRadians, jint pose, jfloat limbPhase,
+    jfloat limbAmplitude, jfloat handSwingProgress, jfloat headYawRadians,
+    jfloat headPitchRadians) {
+    shadermetal::FrameContext::shared().setLocalPlayerShadowProxy(
+        enabled == JNI_TRUE, {relativeX, relativeY, relativeZ},
+        bodyYawRadians, pose < 0 ? 0U : static_cast<std::uint32_t>(pose),
+        limbPhase, limbAmplitude, handSwingProgress, headYawRadians,
+        headPitchRadians);
+}
+
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setCelestialLighting(
+    JNIEnv *, jclass,
+    jfloat sunX, jfloat sunY, jfloat sunZ,
+    jfloat sunRed, jfloat sunGreen, jfloat sunBlue,
+    jfloat moonX, jfloat moonY, jfloat moonZ,
+    jfloat moonRed, jfloat moonGreen, jfloat moonBlue,
+    jfloat skyRed, jfloat skyGreen, jfloat skyBlue,
+    jfloat weatherStrength) {
+    shadermetal::FrameContext::shared().setCelestialLighting(
+        {sunX, sunY, sunZ},
+        {sunRed, sunGreen, sunBlue},
+        {moonX, moonY, moonZ},
+        {moonRed, moonGreen, moonBlue},
+        {skyRed, skyGreen, skyBlue},
+        weatherStrength);
+}
+
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setLocalLights(
+    JNIEnv *environment, jclass, jlong source, jint count) {
+    if (count < 0 || count > 128 || (count != 0 && source == 0)) {
+        throwIllegalArgument(environment, "local light buffer or count is invalid");
+        return;
+    }
+    const auto *lights = reinterpret_cast<const void *>(
+        static_cast<std::uintptr_t>(source));
+    shadermetal::FrameContext::shared().setLocalLights(
+        lights, static_cast<std::size_t>(count));
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setClearColor(

@@ -89,6 +89,14 @@ JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_close
 
 /*
  * Class:     com_example_shadermetal_proxy_RendererProxy
+ * Method:    resetRayTracingScene
+ * Signature: ()V
+ */
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_resetRayTracingScene
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     com_example_shadermetal_proxy_RendererProxy
  * Method:    shouldRenderWorld
  * Signature: (Z)V
  */
@@ -134,6 +142,38 @@ JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_updateOv
  */
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setCameraPos
   (JNIEnv *, jclass, jdouble, jdouble, jdouble);
+
+/*
+ * Class:     com_example_shadermetal_proxy_RendererProxy
+ * Method:    setCameraSubmergedInWater
+ * Signature: (Z)V
+ */
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setCameraSubmergedInWater
+  (JNIEnv *, jclass, jboolean);
+
+/*
+ * Class:     com_example_shadermetal_proxy_RendererProxy
+ * Method:    setLocalPlayerShadowProxy
+ * Signature: (ZFFFFIFFFFF)V
+ */
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setLocalPlayerShadowProxy
+  (JNIEnv *, jclass, jboolean, jfloat, jfloat, jfloat, jfloat, jint, jfloat, jfloat, jfloat, jfloat, jfloat);
+
+/*
+ * Class:     com_example_shadermetal_proxy_RendererProxy
+ * Method:    setCelestialLighting
+ * Signature: (FFFFFFFFFFFFFFFF)V
+ */
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setCelestialLighting
+  (JNIEnv *, jclass, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat, jfloat);
+
+/*
+ * Class:     com_example_shadermetal_proxy_RendererProxy
+ * Method:    setLocalLights
+ * Signature: (JI)V
+ */
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setLocalLights
+  (JNIEnv *, jclass, jlong, jint);
 
 /*
  * Class:     com_example_shadermetal_proxy_RendererProxy

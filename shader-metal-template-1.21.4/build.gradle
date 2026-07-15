@@ -42,6 +42,10 @@ def nativeBuildDir = layout.buildDirectory.dir('native')
 def jniClassDir = layout.buildDirectory.dir('jni-classes')
 def generatedNativeResourcesDir = layout.buildDirectory.dir('generated/native-resources')
 def nativeLibrary = nativeBuildDir.map { it.file('libshadermetal.dylib') }
+def gameModeApp = layout.buildDirectory.dir('gamemode/ShaderMetal Dev.app')
+def gameModeExecutable = gameModeApp.map {
+	it.file('Contents/MacOS/ShaderMetalDev')
+}
 def nativeBuildType = providers.gradleProperty('shadermetalNativeBuildType')
 	.orElse('RelWithDebInfo')
 
@@ -89,7 +93,8 @@ tasks.register('buildNative', Exec) {
 	description = 'Builds libshadermetal.dylib.'
 	group = 'build'
 	dependsOn tasks.named('configureNative')
-	inputs.files(fileTree('native/src'), fileTree('native/include'), fileTree('native/tests'))
+	inputs.files(fileTree('native/src'), fileTree('native/include'), fileTree('native/tests'),
+		fileTree('native/shaders'))
 	inputs.file(file('native/CMakeLists.txt'))
 	inputs.property 'nativeBuildType', nativeBuildType
 	outputs.file(nativeLibrary)
@@ -141,13 +146,71 @@ tasks.named('sourcesJar') {
 	dependsOn tasks.named('stageNativeLibrary')
 }
 
+tasks.register('prepareGameModeApp', Exec) {
+	description = 'Builds the LaunchServices-hosted development app for macOS Game Mode.'
+	group = 'build'
+	inputs.files(fileTree('script/gamemode'), file('script/prepare_gamemode_app.sh'))
+	inputs.property 'javaHome', System.getProperty('java.home')
+	outputs.file(gameModeExecutable)
+	commandLine file('script/prepare_gamemode_app.sh').absolutePath,
+		System.getProperty('java.home'), gameModeApp.get().asFile.absolutePath
+}
+
 tasks.named('runClient', JavaExec) {
 	args '--width', '1280', '--height', '720'
+	environment 'MTL_HUD_ENABLED', '1'
+}
+
+def loomRunClient = tasks.named('runClient', JavaExec)
+tasks.register('runClientGameMode', Exec) {
+	description = 'Runs the Fabric client through a LaunchServices game app.'
+	group = 'fabric'
+	dependsOn tasks.named('prepareGameModeApp')
+	dependsOn {
+		def source = loomRunClient.get()
+		source.taskDependencies.getDependencies(source)
+	}
+
+	doFirst {
+		def source = loomRunClient.get()
+		def launchCommand = [file('script/run_client_gamemode.sh').absolutePath]
+		launchCommand.addAll(source.allJvmArgs)
+		if (providers.gradleProperty('shadermetalDebug').orElse('false').get().toBoolean()) {
+			launchCommand.add(
+				'-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:5005')
+		}
+		launchCommand.add(source.mainClass.get())
+		launchCommand.addAll(source.args)
+		def extraArguments = providers.gradleProperty('shadermetalGameArgs').orNull
+		if (extraArguments != null && !extraArguments.isBlank()) {
+			launchCommand.addAll(
+				org.apache.tools.ant.types.Commandline.translateCommandline(extraArguments))
+		}
+
+		file('run').mkdirs()
+		workingDir file('run')
+		environment source.environment
+		environment 'MTL_HUD_ENABLED', '1'
+		environment 'SHADERMETAL_GAME_MODE_APP', gameModeApp.get().asFile.absolutePath
+		commandLine launchCommand
+	}
 }
 
 jar {
 	from('LICENSE') {
 		rename { "${it}_${project.name}" }
+	}
+	from('THIRD_PARTY_NOTICES.md') {
+		rename { "THIRD_PARTY_NOTICES_${project.name}.md" }
+	}
+	from('PROVENANCE.md') {
+		rename { "PROVENANCE_${project.name}.md" }
+	}
+	from('native/third_party/SPIRV-Cross/LICENSE') {
+		rename { 'LICENSE_SPIRV-Cross' }
+	}
+	from('native/third_party/glslang/LICENSE.txt') {
+		rename { 'LICENSE_glslang.txt' }
 	}
 }
 

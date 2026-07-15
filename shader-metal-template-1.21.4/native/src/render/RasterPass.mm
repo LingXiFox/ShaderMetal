@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <new>
@@ -41,6 +42,10 @@ struct DrawCommand final {
     std::int32_t instanceCount = 0;
     std::int32_t firstIndex = 0;
     std::int32_t firstVertex = 0;
+    std::int32_t textureId = 0;
+    std::array<float, 16> modelView{};
+    std::array<float, 16> projection{};
+    bool worldDraw = false;
     bool transientBuffers = true;
     PipelineKey pipelineState{};
 };
@@ -462,7 +467,10 @@ DynamicStateResult applyDynamicState(id<MTLRenderCommandEncoder> encoder,
 struct RasterPass::Impl final {
     mutable std::mutex queueMutex;
     bool acceptingDraws = false;
+    bool encodingPrepared = false;
     std::vector<DrawCommand> queuedDraws;
+    std::vector<DrawCommand> encodingDraws;
+    std::optional<std::size_t> worldDrawCount;
     std::vector<std::int32_t> encodedTransientBufferIds;
     std::vector<std::int32_t> deferredBufferReleases;
 
@@ -500,6 +508,8 @@ void RasterPass::beginFrame() {
     eraseBuffers(deferredReleases);
     {
         std::lock_guard lock(impl_->queueMutex);
+        impl_->worldDrawCount.reset();
+        impl_->encodingPrepared = false;
         impl_->acceptingDraws = true;
     }
 }
@@ -509,7 +519,9 @@ bool RasterPass::enqueueDraw(std::int32_t vertexId, std::int32_t indexId,
                              std::int32_t indexType, const void *uniformData,
                              std::size_t uniformSize, std::int32_t instanceCount,
                              std::int32_t firstIndex, std::int32_t firstVertex,
-                             bool transientBuffers, std::string &error) {
+                             const void *matrixData, std::int32_t textureId,
+                             bool worldDraw, bool transientBuffers,
+                             std::string &error) {
     error.clear();
     if (vertexId < 0 || indexId < 0 || shaderId < 0) {
         error = "draw references a negative resource ID";
@@ -525,6 +537,14 @@ bool RasterPass::enqueueDraw(std::int32_t vertexId, std::int32_t indexId,
     }
     if (uniformSize != 0 && uniformData == nullptr) {
         error = "draw uniform pointer is null for a nonempty uniform block";
+        return false;
+    }
+    if (matrixData == nullptr) {
+        error = "draw matrix pointer is null";
+        return false;
+    }
+    if (textureId < 0) {
+        error = "draw texture ID must be nonnegative";
         return false;
     }
 
@@ -547,6 +567,8 @@ bool RasterPass::enqueueDraw(std::int32_t vertexId, std::int32_t indexId,
     command.instanceCount = instanceCount;
     command.firstIndex = firstIndex;
     command.firstVertex = firstVertex;
+    command.textureId = textureId;
+    command.worldDraw = worldDraw;
     command.transientBuffers = transientBuffers;
     command.pipelineState = PipelineStateTracker::shared().snapshot();
     try {
@@ -554,6 +576,10 @@ bool RasterPass::enqueueDraw(std::int32_t vertexId, std::int32_t indexId,
         if (uniformSize != 0) {
             command.uniformData.assign(bytes, bytes + uniformSize);
         }
+        const auto *matrices = static_cast<const float *>(matrixData);
+        std::copy_n(matrices, command.modelView.size(), command.modelView.begin());
+        std::copy_n(matrices + command.modelView.size(), command.projection.size(),
+                    command.projection.begin());
     } catch (const std::bad_alloc &) {
         error = "unable to retain per-draw uniform bytes";
         return false;
@@ -571,6 +597,47 @@ bool RasterPass::enqueueDraw(std::int32_t vertexId, std::int32_t indexId,
         return false;
     }
     return true;
+}
+
+void RasterPass::sealWorld() {
+    std::lock_guard lock(impl_->queueMutex);
+    if (impl_->acceptingDraws && !impl_->worldDrawCount.has_value()) {
+        impl_->worldDrawCount = impl_->queuedDraws.size();
+    }
+}
+
+std::vector<RayTracingDraw> RasterPass::rayTracingDraws() const {
+    std::vector<RayTracingDraw> result;
+    std::lock_guard lock(impl_->queueMutex);
+    const std::vector<DrawCommand> &draws = impl_->encodingPrepared
+        ? impl_->encodingDraws
+        : impl_->queuedDraws;
+    const std::size_t worldCount = std::min(
+        impl_->worldDrawCount.value_or(0), draws.size());
+    result.reserve(worldCount);
+    for (std::size_t index = 0; index < worldCount; ++index) {
+        const DrawCommand &draw = draws[index];
+        if (!draw.worldDraw) {
+            continue;
+        }
+        result.push_back(RayTracingDraw{
+            draw.vertexId,
+            draw.indexId,
+            draw.shaderId,
+            draw.indexCount,
+            draw.indexType,
+            draw.firstIndex,
+            draw.firstVertex,
+            draw.textureId,
+            draw.modelView,
+            draw.projection,
+            draw.instanceCount,
+            draw.worldDraw,
+            draw.transientBuffers,
+            draw.pipelineState.blendEnabled,
+        });
+    }
+    return result;
 }
 
 bool RasterPass::deferBufferRelease(std::int32_t bufferId, std::string &error) {
@@ -592,28 +659,54 @@ bool RasterPass::deferBufferRelease(std::int32_t bufferId, std::string &error) {
 
 RasterEncodeResult RasterPass::encodeQueuedDraws(id<MTLRenderCommandEncoder> encoder,
                                                   NSUInteger targetWidth,
-                                                  NSUInteger targetHeight) {
+                                                  NSUInteger targetHeight,
+                                                  RasterPartition partition) {
     RasterEncodeResult result;
-    std::vector<DrawCommand> draws;
+    const std::vector<DrawCommand> *drawsPointer = nullptr;
+    std::size_t rangeBegin = 0;
+    std::size_t rangeEnd = 0;
     {
         std::lock_guard lock(impl_->queueMutex);
         impl_->acceptingDraws = false;
-        draws.swap(impl_->queuedDraws);
-        try {
-            impl_->encodedTransientBufferIds.reserve(
-                impl_->encodedTransientBufferIds.size() + draws.size() * 2U);
-            for (const DrawCommand &draw : draws) {
-                if (draw.transientBuffers) {
-                    impl_->encodedTransientBufferIds.push_back(draw.vertexId);
-                    impl_->encodedTransientBufferIds.push_back(draw.indexId);
+        if (!impl_->encodingPrepared) {
+            impl_->encodingDraws.swap(impl_->queuedDraws);
+            impl_->encodingPrepared = true;
+            try {
+                impl_->encodedTransientBufferIds.reserve(
+                    impl_->encodedTransientBufferIds.size() +
+                    impl_->encodingDraws.size() * 2U);
+                for (const DrawCommand &draw : impl_->encodingDraws) {
+                    if (draw.transientBuffers) {
+                        impl_->encodedTransientBufferIds.push_back(draw.vertexId);
+                        impl_->encodedTransientBufferIds.push_back(draw.indexId);
+                    }
                 }
+            } catch (const std::bad_alloc &) {
+                addError(result, RasterErrorCode::InvalidCommand, 0,
+                         "unable to retain transient buffer IDs for frame-end release");
             }
-        } catch (const std::bad_alloc &) {
-            addError(result, RasterErrorCode::InvalidCommand, 0,
-                     "unable to retain transient buffer IDs for frame-end release");
+        }
+        drawsPointer = &impl_->encodingDraws;
+        const std::size_t drawCount = impl_->encodingDraws.size();
+        switch (partition) {
+        case RasterPartition::All:
+            rangeEnd = drawCount;
+            break;
+        case RasterPartition::World:
+        case RasterPartition::Ui:
+            rangeEnd = drawCount;
+            break;
         }
     }
-    result.submittedDrawCount = draws.size();
+    const std::vector<DrawCommand> &draws = *drawsPointer;
+    result.submittedDrawCount = static_cast<std::size_t>(std::count_if(
+        draws.begin() + static_cast<std::ptrdiff_t>(rangeBegin),
+        draws.begin() + static_cast<std::ptrdiff_t>(rangeEnd),
+        [partition](const DrawCommand &draw) {
+            return partition == RasterPartition::All ||
+                (partition == RasterPartition::World && draw.worldDraw) ||
+                (partition == RasterPartition::Ui && !draw.worldDraw);
+        }));
 
     if (encoder == nil || targetWidth == 0 || targetHeight == 0) {
         if (!draws.empty()) {
@@ -679,8 +772,12 @@ RasterEncodeResult RasterPass::encodeQueuedDraws(id<MTLRenderCommandEncoder> enc
     id<MTLDepthStencilState> boundDepthStencil = nil;
     id<MTLBuffer> boundVertexBuffer = nil;
 
-    for (std::size_t drawIndex = 0; drawIndex < draws.size(); ++drawIndex) {
+    for (std::size_t drawIndex = rangeBegin; drawIndex < rangeEnd; ++drawIndex) {
         const DrawCommand &draw = draws[drawIndex];
+        if ((partition == RasterPartition::World && !draw.worldDraw) ||
+            (partition == RasterPartition::Ui && draw.worldDraw)) {
+            continue;
+        }
         if (draw.indexCount == 0 || draw.instanceCount == 0) {
             ++result.skippedDrawCount;
             if (result.firstSkippedReason.empty()) {
@@ -850,6 +947,9 @@ void RasterPass::releaseEncodedTransientBuffers() {
     {
         std::lock_guard lock(impl_->queueMutex);
         bufferIds.swap(impl_->encodedTransientBufferIds);
+        impl_->encodingDraws.clear();
+        impl_->encodingPrepared = false;
+        impl_->worldDrawCount.reset();
     }
     eraseBuffers(bufferIds);
 }
@@ -860,6 +960,12 @@ void RasterPass::discardFrame() {
         std::lock_guard lock(impl_->queueMutex);
         impl_->acceptingDraws = false;
         draws.swap(impl_->queuedDraws);
+        draws.insert(draws.end(),
+                     std::make_move_iterator(impl_->encodingDraws.begin()),
+                     std::make_move_iterator(impl_->encodingDraws.end()));
+        impl_->encodingDraws.clear();
+        impl_->encodingPrepared = false;
+        impl_->worldDrawCount.reset();
     }
     for (const DrawCommand &draw : draws) {
         if (draw.transientBuffers) {
@@ -901,7 +1007,7 @@ void RasterPass::setResourceBinder(ResourceBinder binder) {
 
 std::size_t RasterPass::queuedDrawCount() const {
     std::lock_guard lock(impl_->queueMutex);
-    return impl_->queuedDraws.size();
+    return impl_->queuedDraws.size() + impl_->encodingDraws.size();
 }
 
 } // namespace shadermetal

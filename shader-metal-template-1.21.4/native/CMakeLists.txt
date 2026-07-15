@@ -47,9 +47,30 @@ file(GLOB_RECURSE SHADERMETAL_SOURCES CONFIGURE_DEPENDS
 )
 
 add_library(shadermetal SHARED ${SHADERMETAL_SOURCES})
+
+find_program(XXD_EXECUTABLE xxd REQUIRED)
+set(RAYTRACE_METAL_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/RayTrace.metal")
+set(RAYTRACE_GENERATED_DIRECTORY
+    "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(RAYTRACE_EMBEDDED_SOURCE
+    "${RAYTRACE_GENERATED_DIRECTORY}/RayTraceMetal.inc")
+add_custom_command(
+    OUTPUT "${RAYTRACE_EMBEDDED_SOURCE}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "${RAYTRACE_GENERATED_DIRECTORY}"
+    COMMAND "${XXD_EXECUTABLE}" -i -n shadermetal_raytrace_metal
+        "${RAYTRACE_METAL_SOURCE}" "${RAYTRACE_EMBEDDED_SOURCE}"
+    DEPENDS "${RAYTRACE_METAL_SOURCE}"
+    VERBATIM
+)
+add_custom_target(shadermetal_embed_raytrace_shader
+    DEPENDS "${RAYTRACE_EMBEDDED_SOURCE}")
+add_dependencies(shadermetal shadermetal_embed_raytrace_shader)
 target_include_directories(shadermetal PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${RAYTRACE_GENERATED_DIRECTORY}"
     ${JNI_INCLUDE_DIRS}
 )
 target_compile_options(shadermetal PRIVATE

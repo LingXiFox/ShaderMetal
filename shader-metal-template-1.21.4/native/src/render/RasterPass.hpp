@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <functional>
 #include <memory>
 #include <span>
@@ -51,6 +52,29 @@ struct DrawUniformBindings final {
     std::span<const std::byte> overlayPost;
 };
 
+enum class RasterPartition : std::uint8_t {
+    All,
+    World,
+    Ui,
+};
+
+struct RayTracingDraw final {
+    std::int32_t vertexId = -1;
+    std::int32_t indexId = -1;
+    std::int32_t shaderId = -1;
+    std::int32_t indexCount = 0;
+    std::int32_t indexType = -1;
+    std::int32_t firstIndex = 0;
+    std::int32_t firstVertex = 0;
+    std::int32_t textureId = 0;
+    std::array<float, 16> modelView{};
+    std::array<float, 16> projection{};
+    std::int32_t instanceCount = 0;
+    bool worldDraw = false;
+    bool transientBuffers = true;
+    bool translucent = false;
+};
+
 class RasterPass final {
 public:
     static constexpr NSUInteger kTextureArgumentBufferIndex = 0;
@@ -73,11 +97,15 @@ public:
                      std::int32_t indexType, const void *uniformData,
                      std::size_t uniformSize, std::int32_t instanceCount,
                      std::int32_t firstIndex, std::int32_t firstVertex,
-                     bool transientBuffers, std::string &error);
+                     const void *matrixData, std::int32_t textureId,
+                     bool worldDraw, bool transientBuffers, std::string &error);
     bool deferBufferRelease(std::int32_t bufferId, std::string &error);
+    void sealWorld();
+    std::vector<RayTracingDraw> rayTracingDraws() const;
     RasterEncodeResult encodeQueuedDraws(id<MTLRenderCommandEncoder> encoder,
                                          NSUInteger targetWidth,
-                                         NSUInteger targetHeight);
+                                         NSUInteger targetHeight,
+                                         RasterPartition partition = RasterPartition::All);
     void releaseEncodedTransientBuffers();
     void discardFrame();
     void close();

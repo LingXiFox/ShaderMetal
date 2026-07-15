@@ -4,5 +4,5 @@ public final class WindowProxy {
     private WindowProxy() {
     }
 
-    public static native void onFramebufferSizeChanged();
+    public static native void onFramebufferSizeChanged(int width, int height);
 }
