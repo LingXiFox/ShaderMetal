@@ -671,12 +671,12 @@ bool RayTracePass::ensureMetalFXResourcesLocked(NSUInteger inputWidth,
         descriptor.specularHitDistanceTextureEnabled = NO;
         descriptor.denoiseStrengthMaskTextureEnabled = NO;
         descriptor.transparencyOverlayTextureEnabled = NO;
+#if defined(__MAC_27_0) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_27_0
         if (@available(macOS 27.0, *)) {
             descriptor.reactiveMaskTextureEnabled = YES;
             descriptor.reactiveMaskTextureFormat = MTLPixelFormatR8Unorm;
-        } else {
-            descriptor.reactiveMaskTextureEnabled = NO;
         }
+#endif
 
         id<MTLFXTemporalDenoisedScaler> scaler =
             [descriptor newTemporalDenoisedScalerWithDevice:device_];
@@ -731,6 +731,7 @@ bool RayTracePass::ensureMetalFXResourcesLocked(NSUInteger inputWidth,
         }
 
         bool reactiveEnabled = false;
+#if defined(__MAC_27_0) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_27_0
         if (@available(macOS 27.0, *)) {
             reactiveEnabled = ensureInput(
                 metalFXReactiveMaskTexture_, MTLPixelFormatR8Unorm,
@@ -741,6 +742,7 @@ bool RayTracePass::ensureMetalFXResourcesLocked(NSUInteger inputWidth,
                 return false;
             }
         }
+#endif
 
         const MTLTextureUsage outputUsage =
             MTLTextureUsageShaderRead | scaler.outputTextureUsage;
@@ -1331,11 +1333,13 @@ bool RayTracePass::encodeLighting(const RayTraceLightingInput &input,
             scaler.depthReversed = NO;
             scaler.worldToViewMatrix = worldToCurrentView;
             scaler.viewToClipMatrix = metalViewToClip;
+#if defined(__MAC_27_0) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_27_0
             if (@available(macOS 27.0, *)) {
                 scaler.reactiveMaskTexture = metalFXReactiveMaskEnabled_
                     ? metalFXReactiveMaskTexture_
                     : nil;
             }
+#endif
             [scaler encodeToCommandBuffer:input.commandBuffer];
             usingMetalFXThisFrame_ = true;
         }
