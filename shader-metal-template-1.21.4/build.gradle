@@ -42,6 +42,8 @@ def nativeBuildDir = layout.buildDirectory.dir('native')
 def jniClassDir = layout.buildDirectory.dir('jni-classes')
 def generatedNativeResourcesDir = layout.buildDirectory.dir('generated/native-resources')
 def nativeLibrary = nativeBuildDir.map { it.file('libshadermetal.dylib') }
+def nativeBuildType = providers.gradleProperty('shadermetalNativeBuildType')
+	.orElse('RelWithDebInfo')
 
 sourceSets {
 	main {
@@ -75,22 +77,36 @@ tasks.register('configureNative', Exec) {
 	group = 'build'
 	dependsOn tasks.named('generateJniHeaders')
 	inputs.file(file('native/CMakeLists.txt'))
+	inputs.property 'nativeBuildType', nativeBuildType
 	outputs.file(nativeBuildDir.map { it.file('CMakeCache.txt') })
 	environment 'JAVA_HOME', System.getProperty('java.home')
 	commandLine 'cmake', '-S', nativeSourceDir.absolutePath,
 		'-B', nativeBuildDir.get().asFile.absolutePath,
-		'-DCMAKE_BUILD_TYPE=Debug'
+		"-DCMAKE_BUILD_TYPE=${nativeBuildType.get()}"
 }
 
 tasks.register('buildNative', Exec) {
 	description = 'Builds libshadermetal.dylib.'
 	group = 'build'
 	dependsOn tasks.named('configureNative')
-	inputs.files(fileTree('native/src'), fileTree('native/include'))
+	inputs.files(fileTree('native/src'), fileTree('native/include'), fileTree('native/tests'))
 	inputs.file(file('native/CMakeLists.txt'))
+	inputs.property 'nativeBuildType', nativeBuildType
 	outputs.file(nativeLibrary)
 	commandLine 'cmake', '--build', nativeBuildDir.get().asFile.absolutePath,
 		'--parallel', '2'
+}
+
+tasks.register('testNative', Exec) {
+	description = 'Runs the ShaderMetal native unit tests.'
+	group = 'verification'
+	dependsOn tasks.named('buildNative')
+	commandLine 'ctest', '--test-dir', nativeBuildDir.get().asFile.absolutePath,
+		'--output-on-failure'
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('testNative')
 }
 
 tasks.register('stageNativeLibrary', Copy) {

@@ -38,11 +38,13 @@ MetalDevice &MetalDevice::shared() {
 }
 
 bool MetalDevice::initialize(NSWindow *window, std::string &error) {
+    bool displaySyncEnabled = true;
     {
         std::lock_guard lock(mutex_);
         if (initialized_) {
             return true;
         }
+        displaySyncEnabled = displaySyncEnabled_;
     }
     if (window == nil) {
         error = "cannot install Metal layer without an NSWindow";
@@ -54,6 +56,10 @@ bool MetalDevice::initialize(NSWindow *window, std::string &error) {
         error = "MTLCreateSystemDefaultDevice returned nil";
         return false;
     }
+    if (device.argumentBuffersSupport != MTLArgumentBuffersTier2) {
+        error = "ShaderMetal requires Metal argument buffers tier 2";
+        return false;
+    }
     id<MTLCommandQueue> commandQueue = [device newCommandQueue];
     if (commandQueue == nil) {
         error = "unable to create the Metal command queue";
@@ -63,6 +69,7 @@ bool MetalDevice::initialize(NSWindow *window, std::string &error) {
 
     __block ShaderMetalPassthroughView *metalView = nil;
     __block CAMetalLayer *metalLayer = nil;
+    __block CGSize initialDrawableSize = CGSizeMake(1.0, 1.0);
     __block NSString *installationError = nil;
     runOnMainThreadSync(^{
         NSView *contentView = window.contentView;
@@ -77,7 +84,7 @@ bool MetalDevice::initialize(NSWindow *window, std::string &error) {
         metalLayer.framebufferOnly = YES;
         metalLayer.maximumDrawableCount = 3;
         metalLayer.allowsNextDrawableTimeout = YES;
-        metalLayer.drawableSize = CGSizeMake(1280.0, 720.0);
+        metalLayer.displaySyncEnabled = displaySyncEnabled ? YES : NO;
         metalLayer.contentsScale = window.backingScaleFactor;
         metalLayer.opaque = YES;
 
@@ -86,6 +93,11 @@ bool MetalDevice::initialize(NSWindow *window, std::string &error) {
         metalView.wantsLayer = YES;
         metalView.layer = metalLayer;
         metalLayer.frame = metalView.bounds;
+        const NSRect backingBounds = [metalView convertRectToBacking:metalView.bounds];
+        initialDrawableSize = CGSizeMake(
+            std::max(1.0, std::round(backingBounds.size.width)),
+            std::max(1.0, std::round(backingBounds.size.height)));
+        metalLayer.drawableSize = initialDrawableSize;
         [contentView addSubview:metalView positioned:NSWindowAbove relativeTo:nil];
     });
 
@@ -107,7 +119,10 @@ bool MetalDevice::initialize(NSWindow *window, std::string &error) {
     }
 
     NSLog(@"[ShaderMetal] Metal initialized on GPU: %@", device.name);
-    NSLog(@"[ShaderMetal] Initial drawable size: 1280x720");
+    NSLog(@"[ShaderMetal] Initial drawable size: %.0fx%.0f",
+          initialDrawableSize.width, initialDrawableSize.height);
+    NSLog(@"[ShaderMetal] Metal display sync %s",
+          displaySyncEnabled ? "enabled" : "disabled");
     return true;
 }
 
@@ -129,6 +144,31 @@ id<MTLCommandQueue> MetalDevice::commandQueue() const {
 CAMetalLayer *MetalDevice::layer() const {
     std::lock_guard lock(mutex_);
     return layer_;
+}
+
+void MetalDevice::setDisplaySyncEnabled(bool enabled) {
+    CAMetalLayer *metalLayer = nil;
+    {
+        std::lock_guard lock(mutex_);
+        displaySyncEnabled_ = enabled;
+        metalLayer = layer_;
+    }
+
+    if (metalLayer == nil) {
+        return;
+    }
+
+    __block bool changed = false;
+    runOnMainThreadSync(^{
+        const BOOL requestedValue = enabled ? YES : NO;
+        if (metalLayer.displaySyncEnabled != requestedValue) {
+            metalLayer.displaySyncEnabled = requestedValue;
+            changed = true;
+        }
+    });
+    if (changed) {
+        NSLog(@"[ShaderMetal] Metal display sync %s", enabled ? "enabled" : "disabled");
+    }
 }
 
 void MetalDevice::resize() {

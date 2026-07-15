@@ -9,6 +9,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Window.class)
 public abstract class WindowMixin {
+    @Inject(method = "setVsync(Z)V", at = @At("TAIL"))
+    private void shadermetal$setVsync(boolean enabled, CallbackInfo callbackInfo) {
+        RendererLifecycle.setVsync(enabled);
+    }
+
     @Inject(method = "onFramebufferSizeChanged(JII)V", at = @At("TAIL"))
     private void shadermetal$framebufferSizeChanged(long windowHandle, int width, int height,
         CallbackInfo callbackInfo) {

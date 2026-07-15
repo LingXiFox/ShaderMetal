@@ -3,7 +3,13 @@
 #include "core/FrameContext.hpp"
 #include "core/GlfwBridge.hpp"
 #include "core/MetalDevice.hpp"
+#include "render/PipelineStateTracker.hpp"
+#include "resource/BufferManager.hpp"
+#include "resource/SamplerCache.hpp"
+#include "resource/TextureManager.hpp"
+#include "resource/UniformStorage.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -20,6 +26,31 @@ void throwIllegalState(JNIEnv *environment, const std::string &message) {
     if (exceptionClass != nullptr) {
         environment->ThrowNew(exceptionClass, message.c_str());
         environment->DeleteLocalRef(exceptionClass);
+    }
+}
+
+void throwIllegalArgument(JNIEnv *environment, const std::string &message) {
+    if (environment->ExceptionCheck()) {
+        return;
+    }
+    jclass exceptionClass = environment->FindClass("java/lang/IllegalArgumentException");
+    if (exceptionClass != nullptr) {
+        environment->ThrowNew(exceptionClass, message.c_str());
+        environment->DeleteLocalRef(exceptionClass);
+    }
+}
+
+void copyUniform(JNIEnv *environment, jlong source, shadermetal::UniformSlot slot,
+                 std::size_t size, const char *name) {
+    if (source == 0) {
+        throwIllegalArgument(environment, std::string(name) + " uniform source is null");
+        return;
+    }
+
+    std::string error;
+    const auto *data = reinterpret_cast<const void *>(static_cast<std::uintptr_t>(source));
+    if (!shadermetal::UniformStorage::shared().copy(slot, data, size, error)) {
+        throwIllegalArgument(environment, std::string(name) + " uniform: " + error);
     }
 }
 
@@ -116,10 +147,20 @@ JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_initRend
     }
 }
 
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setVsync(
+    JNIEnv *, jclass, jboolean enabled) {
+    @autoreleasepool {
+        shadermetal::MetalDevice::shared().setDisplaySyncEnabled(enabled == JNI_TRUE);
+    }
+}
+
 JNIEXPORT jint JNICALL Java_com_example_shadermetal_proxy_RendererProxy_maxSupportedTextureSize(
     JNIEnv *, jclass) {
-    SHADERMETAL_STAGE_A_STUB();
-    return 0;
+    id<MTLDevice> device = shadermetal::MetalDevice::shared().device();
+    if (device == nil) {
+        return 0;
+    }
+    return [device supportsFamily:MTLGPUFamilyApple10] ? 32768 : 16384;
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_acquireContext(
@@ -157,6 +198,11 @@ JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_close(
     JNIEnv *, jclass) {
     @autoreleasepool {
         shadermetal::FrameContext::shared().close();
+        shadermetal::BufferManager::shared().clear();
+        shadermetal::TextureManager::shared().clear();
+        shadermetal::SamplerCache::shared().clear();
+        shadermetal::UniformStorage::shared().clear();
+        shadermetal::PipelineStateTracker::shared().reset();
         shadermetal::MetalDevice::shared().close();
         shadermetal::GlfwBridge::shared().close();
     }
@@ -173,18 +219,19 @@ JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_takeScre
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_updateWorldUniform(
-    JNIEnv *, jclass, jlong) {
-    SHADERMETAL_STAGE_A_STUB();
+    JNIEnv *environment, jclass, jlong source) {
+    copyUniform(environment, source, shadermetal::UniformSlot::World, 592, "world");
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_updateSkyUniform(
-    JNIEnv *, jclass, jlong) {
-    SHADERMETAL_STAGE_A_STUB();
+    JNIEnv *environment, jclass, jlong source) {
+    copyUniform(environment, source, shadermetal::UniformSlot::Sky, 80, "sky");
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_updateOverlayPostUniform(
-    JNIEnv *, jclass, jlong) {
-    SHADERMETAL_STAGE_A_STUB();
+    JNIEnv *environment, jclass, jlong source) {
+    copyUniform(environment, source, shadermetal::UniformSlot::OverlayPost, 96,
+                "overlay post");
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setCameraPos(
@@ -193,28 +240,30 @@ JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setCamer
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setClearColor(
-    JNIEnv *, jclass, jfloat, jfloat, jfloat, jfloat) {
-    SHADERMETAL_STAGE_A_STUB();
+    JNIEnv *, jclass, jfloat red, jfloat green, jfloat blue, jfloat alpha) {
+    shadermetal::FrameContext::shared().setClearColor(red, green, blue, alpha);
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setClearDepth(
-    JNIEnv *, jclass, jdouble) {
-    SHADERMETAL_STAGE_A_STUB();
+    JNIEnv *, jclass, jdouble depth) {
+    shadermetal::FrameContext::shared().setClearDepth(depth);
 }
 
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setClearStencil(
-    JNIEnv *, jclass, jint) {
-    SHADERMETAL_STAGE_A_STUB();
+    JNIEnv *, jclass, jint stencil) {
+    shadermetal::FrameContext::shared().setClearStencil(
+        static_cast<std::uint32_t>(stencil));
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_shadermetal_proxy_RendererProxy_vkCmdClearEntireColorAttachment(
     JNIEnv *, jclass) {
-    SHADERMETAL_STAGE_A_STUB();
+    shadermetal::FrameContext::shared().requestClearColor();
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_shadermetal_proxy_RendererProxy_vkCmdClearEntireDepthStencilAttachment(
-    JNIEnv *, jclass, jint) {
-    SHADERMETAL_STAGE_A_STUB();
+    JNIEnv *, jclass, jint mask) {
+    shadermetal::FrameContext::shared().requestClearDepthStencil(
+        static_cast<std::uint32_t>(mask));
 }

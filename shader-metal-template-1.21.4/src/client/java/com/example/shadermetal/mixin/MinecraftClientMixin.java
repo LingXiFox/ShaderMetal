@@ -9,7 +9,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(MinecraftClient.class)
 public abstract class MinecraftClientMixin {
-    @Inject(method = "render(Z)V", at = @At("HEAD"))
+    @Inject(method = "render(Z)V", at = @At(value = "INVOKE",
+        target = "Lnet/minecraft/client/render/GameRenderer;render("
+            + "Lnet/minecraft/client/render/RenderTickCounter;Z)V"), require = 1)
     private void shadermetal$beginFrame(boolean tick, CallbackInfo callbackInfo) {
         RendererLifecycle.beginFrame((MinecraftClient) (Object) this);
     }

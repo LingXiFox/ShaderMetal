@@ -17,6 +17,14 @@ JNIEXPORT jint JNICALL Java_com_example_shadermetal_proxy_BufferProxy_allocateBu
 
 /*
  * Class:     com_example_shadermetal_proxy_BufferProxy
+ * Method:    releaseBuffer
+ * Signature: (I)V
+ */
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_BufferProxy_releaseBuffer
+  (JNIEnv *, jclass, jint);
+
+/*
+ * Class:     com_example_shadermetal_proxy_BufferProxy
  * Method:    initializeBuffer
  * Signature: (III)V
  */

@@ -14,6 +14,33 @@ foreach(framework Metal MetalFX Foundation QuartzCore AppKit)
     find_library(${framework}_LIBRARY ${framework} REQUIRED)
 endforeach()
 
+# Stage B always requires GLSL -> SPIR-V -> MSL. Keep the vendored builds
+# focused on the libraries ShaderMetal actually links so native builds stay
+# predictable on developer machines.
+set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_STATIC ON CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_GLSL ON CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_MSL ON CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_CPP OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_REFLECT OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_C_API OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_ENABLE_UTIL OFF CACHE BOOL "" FORCE)
+set(SPIRV_CROSS_SKIP_INSTALL ON CACHE BOOL "" FORCE)
+
+set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
+set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+set(ENABLE_PCH OFF CACHE BOOL "" FORCE)
+set(ENABLE_SPIRV ON CACHE BOOL "" FORCE)
+set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(third_party/SPIRV-Cross)
+add_subdirectory(third_party/glslang)
+
 file(GLOB_RECURSE SHADERMETAL_SOURCES CONFIGURE_DEPENDS
     "src/*.cpp"
     "src/*.mm"
@@ -35,17 +62,33 @@ target_link_libraries(shadermetal PRIVATE
     ${Foundation_LIBRARY}
     ${QuartzCore_LIBRARY}
     ${AppKit_LIBRARY}
+    spirv-cross-msl
+    glslang
+    glslang-default-resource-limits
 )
-
-option(SHADERMETAL_BUILD_SHADER_TOOLCHAIN
-    "Build the stage B glslang and SPIRV-Cross toolchain" OFF)
-if(SHADERMETAL_BUILD_SHADER_TOOLCHAIN)
-    add_subdirectory(third_party/SPIRV-Cross)
-    add_subdirectory(third_party/glslang)
-    target_link_libraries(shadermetal PRIVATE spirv-cross-msl glslang)
-endif()
 
 set_target_properties(shadermetal PROPERTIES
     OUTPUT_NAME "shadermetal"
     SUFFIX ".dylib"
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(shadermetal_shader_compiler_tests
+        tests/ShaderCompilerTests.cpp
+        src/core/ShaderCompiler.cpp
+    )
+    target_include_directories(shadermetal_shader_compiler_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_compile_options(shadermetal_shader_compiler_tests PRIVATE
+        -Wall -Wextra -Wpedantic
+    )
+    target_link_libraries(shadermetal_shader_compiler_tests PRIVATE
+        spirv-cross-msl
+        glslang
+        glslang-default-resource-limits
+    )
+    add_test(NAME shadermetal_shader_compiler
+        COMMAND shadermetal_shader_compiler_tests)
+endif()

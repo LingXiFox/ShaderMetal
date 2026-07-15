@@ -6,6 +6,8 @@ public final class BufferProxy {
 
     public static native int allocateBuffer();
 
+    public static native void releaseBuffer(int id);
+
     public static native void initializeBuffer(int id, int size, int usageFlags);
 
     public static native void queueUpload(long source, int destinationId);

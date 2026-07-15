@@ -18,6 +18,7 @@ public:
     id<MTLDevice> device() const;
     id<MTLCommandQueue> commandQueue() const;
     CAMetalLayer *layer() const;
+    void setDisplaySyncEnabled(bool enabled);
     void resize();
     void close();
 
@@ -35,6 +36,7 @@ private:
     NSWindow *window_ = nil;
     NSView *metalView_ = nil;
     CAMetalLayer *layer_ = nil;
+    bool displaySyncEnabled_ = true;
 };
 
 } // namespace shadermetal

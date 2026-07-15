@@ -25,6 +25,14 @@ JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_initRend
 
 /*
  * Class:     com_example_shadermetal_proxy_RendererProxy
+ * Method:    setVsync
+ * Signature: (Z)V
+ */
+JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_RendererProxy_setVsync
+  (JNIEnv *, jclass, jboolean);
+
+/*
+ * Class:     com_example_shadermetal_proxy_RendererProxy
  * Method:    maxSupportedTextureSize
  * Signature: ()I
  */

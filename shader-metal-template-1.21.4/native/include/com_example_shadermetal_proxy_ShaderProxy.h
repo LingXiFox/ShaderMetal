@@ -10,10 +10,10 @@ extern "C" {
 /*
  * Class:     com_example_shadermetal_proxy_ShaderProxy
  * Method:    registerShader
- * Signature: (Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;J)I
+ * Signature: (Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;)I
  */
 JNIEXPORT jint JNICALL Java_com_example_shadermetal_proxy_ShaderProxy_registerShader
-  (JNIEnv *, jclass, jstring, jint, jstring, jstring, jlong);
+  (JNIEnv *, jclass, jstring, jint, jint, jint, jstring, jstring);
 
 #ifdef __cplusplus
 }

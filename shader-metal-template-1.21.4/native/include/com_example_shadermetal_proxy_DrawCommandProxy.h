@@ -10,10 +10,10 @@ extern "C" {
 /*
  * Class:     com_example_shadermetal_proxy_DrawCommandProxy
  * Method:    draw
- * Signature: (IIIIIII)V
+ * Signature: (IIIIIJIIIIZ)V
  */
 JNIEXPORT void JNICALL Java_com_example_shadermetal_proxy_DrawCommandProxy_draw
-  (JNIEnv *, jclass, jint, jint, jint, jint, jint, jint, jint);
+  (JNIEnv *, jclass, jint, jint, jint, jint, jint, jlong, jint, jint, jint, jint, jboolean);
 
 #ifdef __cplusplus
 }

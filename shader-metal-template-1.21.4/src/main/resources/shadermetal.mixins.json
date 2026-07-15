@@ -4,8 +4,19 @@
 	"package": "com.example.shadermetal.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
+		"AbstractTextureMixin",
+		"BufferRendererMixin",
+		"CompiledShaderMixin",
+		"GameRendererMixin",
+		"GlStateManagerMixin",
+		"InGameHudMixin",
+		"LightmapTextureManagerMixin",
 		"MinecraftClientMixin",
+		"NativeImageMixin",
 		"RenderSystemMixin",
+		"ShaderProgramMixin",
+		"TextureUtilMixin",
+		"VertexBufferMixin",
 		"WindowMixin"
 	],
 	"injectors": {

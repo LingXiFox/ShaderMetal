@@ -8,6 +8,8 @@ public final class RendererProxy {
 
     public static native void initRenderer(String[] glfwLibraryCandidates, long windowHandle);
 
+    public static native void setVsync(boolean enabled);
+
     public static native int maxSupportedTextureSize();
 
     public static native void acquireContext();
